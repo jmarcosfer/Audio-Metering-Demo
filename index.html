@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]>      <html class="no-js lt-ie9 lt-ie8 lt-ie7"> <![endif]-->
+<!--[if IE 7]>         <html class="no-js lt-ie9 lt-ie8"> <![endif]-->
+<!--[if IE 8]>         <html class="no-js lt-ie9"> <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]-->
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<title>Essentia.js Audio Metering Demo</title>
+		<meta name="description" content="">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<link rel="stylesheet" href="styles/main.css">
+		<script src="essentia.js-dist-with-ebur128/essentia.js-core.js"></script>
+		<script src="essentia.js-dist-with-ebur128/essentia-wasm.web.js"></script>
+	</head>
+	<body>
+		<header>
+			<h1>Audio Metering Visualisation with</h1>
+			<a href="https://mtg.github.io/essentia.js/">
+				<img src="images/essentiajsbanner.png" alt="Essentia.js logo and link to site" style="width:100%;">
+			</a>
+		</header>
+		<div class="main-view">
+			<div id="audio-container" class="drop-zone sub-view">
+				<p>Drop your file here...</p>
+			</div>
+			<div id="audio-controls" class="sub-view">
+				<button class="control">
+					<label for="upload">Select file</label>
+					<input id="upload" class="control" type="file" accept="audio/*">
+				</button>
+				<button id="play-pause" class="control">Play/Pause</button>
+				<button id="stop" class="control">Stop</button>
+				<button id="loop-toggle" class="control">Loop Off</button>
+			</div>
+		</div>
+
+		<script src="scripts/metering.js" async defer></script>
+	</body>
+</html>

@@ -1,0 +1,95 @@
+/*|| General styles */
+
+body {
+	width: 70%;
+	margin: 0 auto;
+	font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
+	font-size: 14px;
+}
+
+header {
+	margin-top: 20px;
+	display: flex;
+	flex-direction: row;
+	justify-content: center;
+
+	background-color: #f4df4f;
+	border-radius: 10px;
+}
+
+.main-view {
+	height: 800px;
+	width: 100%;
+	margin: 20px auto 0;
+}
+
+.sub-view {
+	width: 100%;
+	border-radius: 10px;
+}
+
+/*|| Specific elements */
+
+[href="https://mtg.github.io/essentia.js/"] {
+	margin-left: 1em;
+	width: 30%;
+	flex-grow: 0;
+	display: flex;
+}
+
+[src="images/essentiajsbanner.png"] {
+	border: 1px solid rgb(0, 0, 0);
+	border-radius: 10px;
+	align-self: center;
+}
+
+/*|| Audio View and Upload */
+
+#audio-container {
+	height: 200px;
+
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.drop-zone {
+	border: 2px dashed #525252;
+	font-size: 1.5em;
+}
+
+.drop-zone:hover {
+	border: 3px dashed black;
+	font-weight: bold;
+}
+
+.waveform-display {
+
+}
+
+/*|| Audio controls */
+
+#audio-controls {
+	height: 40px;
+	margin-top: 1em;
+
+	display: flex;
+	flex-direction: row;
+	justify-content: left;
+}
+.control {
+	margin: 0 0.5em;
+	height: 1.7em;
+}
+
+.control:first-child {
+	margin: 0 0.5em 0 0;
+}
+
+.control:last-child {
+	margin: 0 0 0 0.5em;
+}
+
+input[type="file"] {
+	display: none;
+}
