@@ -1,3 +1,11 @@
+// Audio Constants
+const ctx = new (window.AudioContext || window.webkitAudioContext);
+const SR = ctx.sampleRate;
+// frame generator params (match momentaryLoudness: 400ms, 0.1s hopSize)
+const frameSize = SR * 0.4;
+const hopSize = SR * 0.1;
+
+
 // Instantiate Essentia
 let essentia;
 EssentiaModule().then((EssentiaWasmModule) => {
@@ -6,37 +14,6 @@ EssentiaModule().then((EssentiaWasmModule) => {
 })
 
 // UTILITY FUNCTIONS
-// Event Handlers
-function dragOverHandler(e) {
-	e.preventDefault();
-}
-
-function dropHandler(e) {
-	e.preventDefault();
-
-	// Get file from drag event
-	const numFiles = e.dataTransfer.files.length
-	if (numFiles == 1) {
-		const file = e.dataTransfer.files[0];
-		// Check that it's an audio file
-		if (file.type.indexOf("audio") >= 0) {
-			// Audio Processing:
-			const ctx = new (window.AudioContext || window.webkitAudioContext);
-			console.log(`Got file named ${file.name}`);
-			analyseAudio(file, ctx).then(drawAudio);
-
-			// Styling:
-
-		} else {
-			alert("We couldn't accept your file. Make sure you're uploading an audio file");
-		}
-	} else if (numFiles > 1) {
-		alert("Sorry, you can only upload 1 file at a time. Try again.");
-	} else {
-		alert("0 files were provided. Please upload a file.")
-	}
-}
-
 
 // Audio Processing
 function phaseCorr(frameLeft, frameRight) {
@@ -67,43 +44,44 @@ function phaseCorr(frameLeft, frameRight) {
 
 }
 
-async function analyseAudio(f, context) {
+async function analyseAudio(f) {
 	let descriptors = new Object();
-	const SR = context.sampleRate;
-	// frame generator params (match momentaryLoudness: 400ms, 0.1s hopSize)
-	const frameSize = SR * 0.4;
-	const hopSize = SR * 0.1;
 
 	// Decode Audio File
 	const buffer = await f.arrayBuffer();
-	const decodedAudio = await context.decodeAudioData(buffer);
+	const decodedAudio = await ctx.decodeAudioData(buffer);
 
 	const leftChannelArray = decodedAudio.getChannelData(0);
 	const rightChannelArray = decodedAudio.getChannelData(1);
 	const leftChannelVector = essentia.arrayToVector(leftChannelArray);
-	const rightChannelVector = essentia.arrayToVector(rightChannelArray); 
+	const rightChannelVector = essentia.arrayToVector(rightChannelArray);
+	descriptors.left = leftChannelArray;
+	descriptors.right = rightChannelArray;
 
 	const framesLeft = essentia.FrameGenerator(leftChannelArray, frameSize, hopSize);
 	const framesRight = essentia.FrameGenerator(rightChannelArray, frameSize, hopSize);
 
-	descriptors.leftRMS = [];
-	descriptors.rightRMS = [];
-	descriptors.phaseCorrelation = [];
+	const leftRMS = [];
+	const rightRMS = [];
+	const phaseCorrelation = [];
 	for (let i=0; i<framesLeft.size(); i++) {
 		const leftFrame = framesLeft.get(i);
 		const rightFrame = framesRight.get(i);
 		// RMS:
-		descriptors.leftRMS.push(
+		leftRMS.push(
 			essentia.RMS(leftFrame).rms
 		);
-		descriptors.rightRMS.push(
+		rightRMS.push(
 			essentia.RMS(rightFrame).rms
 		);
 		// Phase Correlation:
-		descriptors.phaseCorrelation.push(
+		phaseCorrelation.push(
 			phaseCorr(leftFrame, rightFrame)
 		);
 	}
+	descriptors.leftRMS = Float32Array.from(leftRMS);
+	descriptors.rightRMS = Float32Array.from(rightRMS);
+	descriptors.phaseCorrelation = Float32Array.from(phaseCorrelation);
 
 	// Loudness EBUR128:
 	const loudnessEBU = essentia.LoudnessEBUR128(leftChannelVector, rightChannelVector, 0.1, SR);
@@ -117,10 +95,56 @@ async function analyseAudio(f, context) {
 }
 
 
-function drawAudio(signal) {
+function drawAudio(descriptors) {
 	/* Visualise descriptors on #audio-container */
-	console.log("Computed descriptors. Ready to draw!");
-	console.log(`PhaseCorr: \n ${signal.phaseCorrelation}`);
+	// Grab container ref from DOM:
+	const audioContainer = document.querySelector("#audio-container");
+
+	// Instantiate FAV.js objects
+	const display = new fav.Display("audio-container", "wave", audioContainer.clientWidth, audioContainer.clientHeight);
+
+	console.log(descriptors);
+	let wave = new fav.Signal(descriptors.left, SR);
+	let phase = new fav.Signal(descriptors.phaseCorrelation, SR/hopSize);
+
+	wave.smooth(20).draw(display, 
+		[phase.scale(60).offset(60).smooth(10),
+			100,
+			50
+		]);
+}
+
+
+// Event Handlers
+function dragOverHandler(e) {
+	e.preventDefault();
+}
+
+function dropHandler(e) {
+	e.preventDefault();
+
+	// Get file from drag event
+	const numFiles = e.dataTransfer.files.length
+	if (numFiles == 1) {
+		const file = e.dataTransfer.files[0];
+		// Check that it's an audio file
+		if (file.type.indexOf("audio") >= 0) {
+			// Audio Processing:
+			console.log(`Got file named ${file.name}`);
+			analyseAudio(file)
+			.then(drawAudio)
+			.catch((e) => { console.log(`Error in handling promise: ${e}`) });
+
+			// Styling:
+
+		} else {
+			alert("We couldn't accept your file. Make sure you're uploading an audio file");
+		}
+	} else if (numFiles > 1) {
+		alert("Sorry, you can only upload 1 file at a time. Try again.");
+	} else {
+		alert("0 files were provided. Please upload a file.")
+	}
 }
 
 
