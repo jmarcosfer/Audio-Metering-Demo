@@ -5,7 +5,8 @@ EssentiaModule().then((EssentiaWasmModule) => {
 	console.log(essentia.version);
 })
 
-// Utility functions
+// UTILITY FUNCTIONS
+// Event Handlers
 function dragOverHandler(e) {
 	e.preventDefault();
 }
@@ -22,9 +23,7 @@ function dropHandler(e) {
 			// Audio Processing:
 			const ctx = new (window.AudioContext || window.webkitAudioContext);
 			console.log(`Got file named ${file.name}`);
-			analyseAudio(file, ctx).then(function(signal) {
-				drawAudio(signal);
-			});
+			analyseAudio(file, ctx).then(drawAudio);
 
 			// Styling:
 
@@ -38,17 +37,44 @@ function dropHandler(e) {
 	}
 }
 
-function drawAudio(signal) {
-	/* Visualise descriptors on #audio-container */
+
+// Audio Processing
+function phaseCorr(frameLeft, frameRight) {
+	// convert to float32array
+	const L = essentia.vectorToArray(frameLeft);
+	const R = essentia.vectorToArray(frameRight);
+
+	const n = L.length;
+	if (n == 0) return null;
+
+	let sumL = 0,
+		sumR = 0,
+		sumLR = 0,
+		sumL2 = 0,
+		sumR2 = 0;
+	
+	// compute sums
+	L.forEach((Li, i) => {
+		const Ri = R[i];
+		sumL += Li;
+		sumR += Ri;
+		sumLR += Li * Ri;
+		sumL2 += Li * Li;
+		sumR2 += Ri * Ri;
+	});
+
+	return (n * sumLR - sumL * sumR) / Math.sqrt((n * sumL2 - sumL * sumL) * (n * sumR2 - sumR * sumR));
 
 }
 
 async function analyseAudio(f, context) {
-	/*
-		- Decode audio file (audioCtx?)
-		- Compute descriptors: Loudness R128, RMS, Phase Correlation
-	*/
+	let descriptors = new Object();
+	const SR = context.sampleRate;
+	// frame generator params (match momentaryLoudness: 400ms, 0.1s hopSize)
+	const frameSize = SR * 0.4;
+	const hopSize = SR * 0.1;
 
+	// Decode Audio File
 	const buffer = await f.arrayBuffer();
 	const decodedAudio = await context.decodeAudioData(buffer);
 
@@ -57,14 +83,46 @@ async function analyseAudio(f, context) {
 	const leftChannelVector = essentia.arrayToVector(leftChannelArray);
 	const rightChannelVector = essentia.arrayToVector(rightChannelArray); 
 
-	// RMS:
-	const leftRMS = essentia.RMS(leftChannelVector);
-	const rightRMS = essentia.RMS(rightChannelVector);
-	console.log(`Computed RMS: ${leftRMS.rms}\n ${rightRMS.rms}`);
+	const framesLeft = essentia.FrameGenerator(leftChannelArray, frameSize, hopSize);
+	const framesRight = essentia.FrameGenerator(rightChannelArray, frameSize, hopSize);
 
-	const loudnessEBU = essentia.LoudnessEBUR128(leftChannelVector, rightChannelVector, 0.1, context.sampleRate);
-	console.log(`Computed momentary loudness: ${loudnessEBU.shortTermLoudness}`);
+	descriptors.leftRMS = [];
+	descriptors.rightRMS = [];
+	descriptors.phaseCorrelation = [];
+	for (let i=0; i<framesLeft.size(); i++) {
+		const leftFrame = framesLeft.get(i);
+		const rightFrame = framesRight.get(i);
+		// RMS:
+		descriptors.leftRMS.push(
+			essentia.RMS(leftFrame).rms
+		);
+		descriptors.rightRMS.push(
+			essentia.RMS(rightFrame).rms
+		);
+		// Phase Correlation:
+		descriptors.phaseCorrelation.push(
+			phaseCorr(leftFrame, rightFrame)
+		);
+	}
+
+	// Loudness EBUR128:
+	const loudnessEBU = essentia.LoudnessEBUR128(leftChannelVector, rightChannelVector, 0.1, SR);
+
+	descriptors.momentaryLoudness = essentia.vectorToArray(loudnessEBU.momentaryLoudness);
+	descriptors.shortTermLoudness = essentia.vectorToArray(loudnessEBU.shortTermLoudness);
+	descriptors.integratedLoudness = loudnessEBU.integratedLoudness;
+	descriptors.loudnessRange = loudnessEBU.loudnessRange;
+	
+	return descriptors;
 }
+
+
+function drawAudio(signal) {
+	/* Visualise descriptors on #audio-container */
+	console.log("Computed descriptors. Ready to draw!");
+	console.log(`PhaseCorr: \n ${signal.phaseCorrelation}`);
+}
+
 
 // Main block
 (function() {
