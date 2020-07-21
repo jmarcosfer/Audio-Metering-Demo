@@ -5,6 +5,7 @@ body {
 	margin: 0 auto;
 	font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
 	font-size: 14px;
+	background-color: #bababa;
 }
 
 header {
@@ -46,26 +47,47 @@ header {
 /*|| Audio View and Upload */
 
 #audio-container {
-	height: 200px;
+	height: 400px;
 
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+
+	color: white;
+}
+
+.drop-zone {
+	border: 3px dashed #f4df4f;
+	font-size: 1.5em;
+}
+
+.drop-zone:hover {
+	border: 4px dashed rgb(237, 98, 93);
+	font-weight: bold;
+}
+
+.audio-display {
+	height: 200px;
+	width: 100%;
+	max-width: 100%;
+	margin: 0;
+	background-color: black;
+	border-radius: inherit;
+	flex: 1;
+	position: relative;
 	display: flex;
 	justify-content: center;
 	align-items: center;
 }
 
-.drop-zone {
-	border: 2px dashed #525252;
-	font-size: 1.5em;
+.audio-display canvas {
+	border: 1px solid black;
+	border-radius: 10px;
+	position: absolute;
+	width: 100%;
 }
 
-.drop-zone:hover {
-	border: 3px dashed black;
-	font-weight: bold;
-}
-
-.waveform-display {
-
-}
 
 /*|| Audio controls */
 

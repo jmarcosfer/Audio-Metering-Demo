@@ -23,7 +23,10 @@
 		</header>
 		<div class="main-view">
 			<div id="audio-container" class="drop-zone sub-view">
-				<p>Drop your file here...</p>
+				<div class="audio-display" id="waveform">
+					<p>Drop your file here...</p>
+				</div>
+				<div class="audio-display" id="loudness-data"></div>
 			</div>
 			<div id="audio-controls" class="sub-view">
 				<button class="control">
@@ -33,6 +36,9 @@
 				<button id="play-pause" class="control">Play/Pause</button>
 				<button id="stop" class="control">Stop</button>
 				<button id="loop-toggle" class="control">Loop Off</button>
+			</div>
+			<div class="sub-view" id="key">
+				
 			</div>
 		</div>
 

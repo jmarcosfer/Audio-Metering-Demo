@@ -51,39 +51,42 @@ async function analyseAudio(f) {
 	const buffer = await f.arrayBuffer();
 	const decodedAudio = await ctx.decodeAudioData(buffer);
 
+	// Separate channels needed for phase correlation
 	const leftChannelArray = decodedAudio.getChannelData(0);
 	const rightChannelArray = decodedAudio.getChannelData(1);
-	const leftChannelVector = essentia.arrayToVector(leftChannelArray);
-	const rightChannelVector = essentia.arrayToVector(rightChannelArray);
-	descriptors.left = leftChannelArray;
-	descriptors.right = rightChannelArray;
 
+	// Sum into mono track:
+	let monoSumArray = leftChannelArray.map(function(sample, idx) {
+		return (sample + rightChannelArray[idx]) / 2
+	});
+	descriptors.mono = monoSumArray;
+
+	// Cut frames
 	const framesLeft = essentia.FrameGenerator(leftChannelArray, frameSize, hopSize);
 	const framesRight = essentia.FrameGenerator(rightChannelArray, frameSize, hopSize);
+	const framesMono = essentia.FrameGenerator(monoSumArray, frameSize, hopSize);
 
-	const leftRMS = [];
-	const rightRMS = [];
+	const monoRMS = [];
 	const phaseCorrelation = [];
 	for (let i=0; i<framesLeft.size(); i++) {
 		const leftFrame = framesLeft.get(i);
 		const rightFrame = framesRight.get(i);
+		const monoFrame = framesMono.get(i);
 		// RMS:
-		leftRMS.push(
-			essentia.RMS(leftFrame).rms
-		);
-		rightRMS.push(
-			essentia.RMS(rightFrame).rms
+		monoRMS.push(
+			essentia.RMS(monoFrame).rms
 		);
 		// Phase Correlation:
 		phaseCorrelation.push(
 			phaseCorr(leftFrame, rightFrame)
 		);
 	}
-	descriptors.leftRMS = Float32Array.from(leftRMS);
-	descriptors.rightRMS = Float32Array.from(rightRMS);
+	descriptors.rms = Float32Array.from(monoRMS);
 	descriptors.phaseCorrelation = Float32Array.from(phaseCorrelation);
 
 	// Loudness EBUR128:
+	const leftChannelVector = essentia.arrayToVector(leftChannelArray);
+	const rightChannelVector = essentia.arrayToVector(rightChannelArray);
 	const loudnessEBU = essentia.LoudnessEBUR128(leftChannelVector, rightChannelVector, 0.1, SR);
 
 	descriptors.momentaryLoudness = essentia.vectorToArray(loudnessEBU.momentaryLoudness);
@@ -98,35 +101,57 @@ async function analyseAudio(f) {
 function drawAudio(descriptors) {
 	/* Visualise descriptors on #audio-container */
 	// Grab container ref from DOM:
-	const audioContainer = document.querySelector("#audio-container");
+	const channelTop = document.querySelector("#waveform");
+	const channelBottom = document.querySelector("#loudness-data");
 
 	// Instantiate FAV.js objects
-	const display = new fav.Display("audio-container", "wave", audioContainer.clientWidth, audioContainer.clientHeight);
+	const displayTop = new fav.Display("waveform", "wave", channelTop.clientWidth, channelTop.clientHeight);
+	const displayBottom = new fav.Display("loudness-data", "line", channelBottom.clientWidth, channelBottom.clientHeight);
+	displayBottom.addLayer("line");
+	displayBottom.addLayer("line");
 
 	console.log(descriptors);
-	let wave = new fav.Signal(descriptors.left, SR);
+	let wave = new fav.Signal(descriptors.mono, SR);
 	let phase = new fav.Signal(descriptors.phaseCorrelation, SR/hopSize);
+	let rms = new fav.Signal(descriptors.rms, SR/hopSize);
+	let mLoudness = new fav.Signal(descriptors.momentaryLoudness, SR/hopSize);
+	let stLoudness = new fav.Signal(descriptors.shortTermLoudness, SR/hopSize);
 
-	wave.smooth(20).draw(display, 
+	wave.smooth(20).draw(displayTop, 
 		[phase.scale(60).offset(60).smooth(10),
 			100,
-			50
+			rms.normalize().reflect().scale(80).offset(15).smooth(15)
 		]);
+
+	rms.normalize().smooth(20).draw(displayBottom[0],
+		"rgba(149, 0, 255, 0.5)"
+		); // light purple
+	mLoudness.normalize().smooth(20).draw(displayBottom[1],
+		"rgba(255, 255, 255, 0.5)"
+		); // white
+	stLoudness.normalize().smooth(20).draw(displayBottom[2],
+		"rgba(31, 244, 255, 0.5)"
+		); // light blue
 }
 
 
 // Event Handlers
+
 function dragOverHandler(e) {
 	e.preventDefault();
 }
 
-function dropHandler(e) {
+function fileUploadHandler(e) {
 	e.preventDefault();
 
+	let numFiles = null;
+	let file;
 	// Get file from drag event
-	const numFiles = e.dataTransfer.files.length
+	if (e.type == "change") numFiles = e.target.files.length;
+	if (e.type == "drop") numFiles = e.dataTransfer.files.length;
 	if (numFiles == 1) {
-		const file = e.dataTransfer.files[0];
+		if (e.type == "change") file = e.target.files[0];
+		if (e.type == "drop") file = e.dataTransfer.files[0];
 		// Check that it's an audio file
 		if (file.type.indexOf("audio") >= 0) {
 			// Audio Processing:
@@ -151,8 +176,12 @@ function dropHandler(e) {
 // Main block
 (function() {
 	const dropZone = document.querySelector(".drop-zone");
+	const uploadButton = document.querySelector("#upload");
 
 	// Drag n drop listeners
 	dropZone.addEventListener("dragover", dragOverHandler);
-	dropZone.addEventListener("drop", dropHandler);
+	dropZone.addEventListener("drop", fileUploadHandler);
+
+	// Select file button listener
+	uploadButton.addEventListener("change", fileUploadHandler);
 })();
