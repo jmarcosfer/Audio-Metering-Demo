@@ -120,6 +120,9 @@ class Layer{
       this.context.lineTo(i, this.canvas.height - y);
     };
     this.context.lineTo(desc.data.length, this.canvas.height - y0);
+    // ADDED [JORGE]
+    this.context.lineWidth = this.canvas.height * 0.02;
+    ////////////////
     this.context.strokeStyle = style;
     this.context.stroke();
   }

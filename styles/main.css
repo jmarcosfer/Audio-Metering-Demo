@@ -86,6 +86,7 @@ header {
 	border-radius: 10px;
 	position: absolute;
 	width: 100%;
+	flex-grow: 1;
 }
 
 
@@ -114,4 +115,22 @@ header {
 
 input[type="file"] {
 	display: none;
+}
+
+#play-pause.playing {
+	background-color: #f7d810;
+}
+
+#play-pause.stopped {
+	background-color: -internal-light-dark-color(rgb(239, 239, 239), rgb(74, 74, 74));
+}
+
+/*|| Data Display */
+#data-display {
+	display: flex;
+	flex-direction: column;
+	justify-content: right;
+	text-align: right;
+
+	font-weight: bold;
 }

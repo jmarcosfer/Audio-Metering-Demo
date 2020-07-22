@@ -1,10 +1,23 @@
-// Audio Constants
-const ctx = new (window.AudioContext || window.webkitAudioContext);
-const SR = ctx.sampleRate;
-// frame generator params (match momentaryLoudness: 400ms, 0.1s hopSize)
-const frameSize = SR * 0.4;
-const hopSize = SR * 0.1;
-
+// App Globals
+let appData = {
+	// Audio Constants
+	ctx: new (window.AudioContext || window.webkitAudioContext),
+	init: () => {
+		appData.SR = appData.ctx.sampleRate;
+		// frame generator params (match momentaryLoudness: 400ms, 0.1s hopSize)
+		appData.frameSize = appData.SR * 0.4;
+		appData.hopSize = appData.SR * 0.1;
+	},
+	decodedAudio: null,
+	uploadedFile: null,
+	descriptors: null,
+	bufferNode: null,
+	playbackState: "stopped",
+	playStartTime: null,
+	pausedTime: null,
+	cursorCanvas: null
+};
+appData.init();
 
 // Instantiate Essentia
 let essentia;
@@ -49,7 +62,8 @@ async function analyseAudio(f) {
 
 	// Decode Audio File
 	const buffer = await f.arrayBuffer();
-	const decodedAudio = await ctx.decodeAudioData(buffer);
+	const decodedAudio = await appData.ctx.decodeAudioData(buffer);
+	appData.decodedAudio = decodedAudio;
 
 	// Separate channels needed for phase correlation
 	const leftChannelArray = decodedAudio.getChannelData(0);
@@ -62,9 +76,9 @@ async function analyseAudio(f) {
 	descriptors.mono = monoSumArray;
 
 	// Cut frames
-	const framesLeft = essentia.FrameGenerator(leftChannelArray, frameSize, hopSize);
-	const framesRight = essentia.FrameGenerator(rightChannelArray, frameSize, hopSize);
-	const framesMono = essentia.FrameGenerator(monoSumArray, frameSize, hopSize);
+	const framesLeft = essentia.FrameGenerator(leftChannelArray, appData.frameSize, appData.hopSize);
+	const framesRight = essentia.FrameGenerator(rightChannelArray, appData.frameSize, appData.hopSize);
+	const framesMono = essentia.FrameGenerator(monoSumArray, appData.frameSize, appData.hopSize);
 
 	const monoRMS = [];
 	const phaseCorrelation = [];
@@ -74,7 +88,7 @@ async function analyseAudio(f) {
 		const monoFrame = framesMono.get(i);
 		// RMS:
 		monoRMS.push(
-			essentia.RMS(monoFrame).rms
+			20 * Math.log10(Math.abs(essentia.RMS(monoFrame).rms)) // linear amp converted to dBFS
 		);
 		// Phase Correlation:
 		phaseCorrelation.push(
@@ -87,17 +101,18 @@ async function analyseAudio(f) {
 	// Loudness EBUR128:
 	const leftChannelVector = essentia.arrayToVector(leftChannelArray);
 	const rightChannelVector = essentia.arrayToVector(rightChannelArray);
-	const loudnessEBU = essentia.LoudnessEBUR128(leftChannelVector, rightChannelVector, 0.1, SR);
+	const loudnessEBU = essentia.LoudnessEBUR128(leftChannelVector, rightChannelVector, 0.1, appData.SR);
 
 	descriptors.momentaryLoudness = essentia.vectorToArray(loudnessEBU.momentaryLoudness);
 	descriptors.shortTermLoudness = essentia.vectorToArray(loudnessEBU.shortTermLoudness);
 	descriptors.integratedLoudness = loudnessEBU.integratedLoudness;
 	descriptors.loudnessRange = loudnessEBU.loudnessRange;
 	
+	appData.descriptors = descriptors;
 	return descriptors;
 }
 
-
+// Visuals
 function drawAudio(descriptors) {
 	/* Visualise descriptors on #audio-container */
 	// Grab container ref from DOM:
@@ -106,21 +121,21 @@ function drawAudio(descriptors) {
 
 	// Instantiate FAV.js objects
 	const displayTop = new fav.Display("waveform", "wave", channelTop.clientWidth, channelTop.clientHeight);
-	const displayBottom = new fav.Display("loudness-data", "line", channelBottom.clientWidth, channelBottom.clientHeight);
-	displayBottom.addLayer("line");
-	displayBottom.addLayer("line");
+	const displayBottom = new fav.Display("loudness-data", "fill", channelBottom.clientWidth, channelBottom.clientHeight);
+	displayBottom.addLayer("fill");
+	displayBottom.addLayer("fill");
 
 	console.log(descriptors);
-	let wave = new fav.Signal(descriptors.mono, SR);
-	let phase = new fav.Signal(descriptors.phaseCorrelation, SR/hopSize);
-	let rms = new fav.Signal(descriptors.rms, SR/hopSize);
-	let mLoudness = new fav.Signal(descriptors.momentaryLoudness, SR/hopSize);
-	let stLoudness = new fav.Signal(descriptors.shortTermLoudness, SR/hopSize);
+	let wave = new fav.Signal(descriptors.mono, appData.SR);
+	let phase = new fav.Signal(descriptors.phaseCorrelation, appData.SR/appData.hopSize);
+	let rms = new fav.Signal(descriptors.rms, appData.SR/appData.hopSize);
+	let mLoudness = new fav.Signal(descriptors.momentaryLoudness, appData.SR/appData.hopSize);
+	let stLoudness = new fav.Signal(descriptors.shortTermLoudness, appData.SR/appData.hopSize);
 
 	wave.smooth(20).draw(displayTop, 
 		[phase.scale(60).offset(60).smooth(10),
 			100,
-			rms.normalize().reflect().scale(80).offset(15).smooth(15)
+			rms.normalize().scale(65).offset(8).smooth(15)
 		]);
 
 	rms.normalize().smooth(20).draw(displayBottom[0],
@@ -132,35 +147,87 @@ function drawAudio(descriptors) {
 	stLoudness.normalize().smooth(20).draw(displayBottom[2],
 		"rgba(31, 244, 255, 0.5)"
 		); // light blue
+	
+	// Canvas Events:
+	appData.cursorCanvas = document.querySelector("#loudness-data").lastChild;
+	appData.cursorCanvas.addEventListener("mousemove", mousemoveCanvasHandler);
+}
+
+// Playback
+function playSound() {
+	appData.bufferNode = appData.ctx.createBufferSource();
+	appData.bufferNode.buffer = appData.decodedAudio;
+	appData.bufferNode.connect(appData.ctx.destination);
+
+	if (appData.pausedTime != null && appData.playbackState === "paused") {
+		appData.playStartTime = Date.now() - appData.pausedTime;
+		appData.bufferNode.start(0, appData.pausedTime / 1000);
+	} else {
+		appData.playStartTime = Date.now();
+		appData.bufferNode.start(0);
+	}
+	
+	appData.playbackState = "playing";
+}
+
+function pauseSound() {
+	appData.bufferNode.stop(0);
+	appData.playbackState = "paused";
+	appData.pausedTime = Date.now() - appData.playStartTime;
 }
 
 
 // Event Handlers
+
+function playPauseHandler(e) {
+	if (appData.ctx.state === "suspended") {
+		appData.ctx.resume();
+	}
+
+	if (appData.playbackState === "stopped" || appData.playbackState === "paused") {
+		playSound();
+		e.target.classList.remove("stopped");
+		e.target.classList.add("playing");
+	} else if (appData.playbackState === "playing") {
+		pauseSound();
+		e.target.classList.remove("playing");
+		e.target.classList.add("stopped");
+	}
+	// switch css class for "playing"
+	
+}
+
+function stopHandler(e) {
+	// call stopSound() if appData.playBackState = "paused" or "playing"
+	if (appData.playbackState === "paused" || appData.playbackState === "playing") {
+		appData.bufferNode.stop(0);
+		appData.pausedTime = null;
+		appData.playbackState = "stopped";
+	}
+}
 
 function dragOverHandler(e) {
 	e.preventDefault();
 }
 
 function fileUploadHandler(e) {
-	e.preventDefault();
 
 	let numFiles = null;
 	let file;
 	// Get file from drag event
 	if (e.type == "change") numFiles = e.target.files.length;
-	if (e.type == "drop") numFiles = e.dataTransfer.files.length;
+	if (e.type == "drop") {numFiles = e.dataTransfer.files.length; e.preventDefault();}
 	if (numFiles == 1) {
 		if (e.type == "change") file = e.target.files[0];
 		if (e.type == "drop") file = e.dataTransfer.files[0];
 		// Check that it's an audio file
 		if (file.type.indexOf("audio") >= 0) {
+			appData.uploadedFile = file;
 			// Audio Processing:
 			console.log(`Got file named ${file.name}`);
 			analyseAudio(file)
 			.then(drawAudio)
 			.catch((e) => { console.log(`Error in handling promise: ${e}`) });
-
-			// Styling:
 
 		} else {
 			alert("We couldn't accept your file. Make sure you're uploading an audio file");
@@ -172,16 +239,43 @@ function fileUploadHandler(e) {
 	}
 }
 
+function mousemoveCanvasHandler(e) {
+	const dataDisplay = document.querySelector("#data-display");
+	let rect = e.target.getBoundingClientRect();
+	let x = e.clientX - rect.left;
+	let normMousePos = x / e.target.clientWidth;
+
+	let mLoudnessIdx = Math.floor(normMousePos * (appData.descriptors.momentaryLoudness.length - 1) );
+	let stLoudnessIdx = Math.floor(normMousePos * (appData.descriptors.shortTermLoudness.length - 1) );
+	let rmsIdx = Math.floor(normMousePos * (appData.descriptors.rms.length - 1) );
+	let phaseIdx = Math.floor(normMousePos * (appData.descriptors.phaseCorrelation.length - 1) );
+	
+	let mLoudnessStr = `Momentary loudness: ${appData.descriptors.momentaryLoudness[mLoudnessIdx]} LUFS`;
+	let stLoudnessStr = `Short Term loudness: ${appData.descriptors.shortTermLoudness[stLoudnessIdx]} LUFS`;
+	let rmsStr = `RMS loudness: ${appData.descriptors.momentaryLoudness[rmsIdx]} dbFS`;
+	let phaseStr = `Phase correlation: ${appData.descriptors.phaseCorrelation[phaseIdx]}\n (-1: out-of-phase\n 0: decorrelated, full stereo width\n 1: correlated, false stereo)`;
+	
+	dataDisplay.innerHTML = `<div> ${mLoudnessStr} </div> <div> ${stLoudnessStr} </div> <div> ${rmsStr} </div> <div> ${phaseStr}`;
+}
 
 // Main block
 (function() {
+	// GRAB ELEMENTS
 	const dropZone = document.querySelector(".drop-zone");
 	const uploadButton = document.querySelector("#upload");
+	const playButton = document.querySelector("#play-pause");
+	const stopButton = document.querySelector("#stop");
 
-	// Drag n drop listeners
+	// SET LISTENERS
+	// Drag n drop
 	dropZone.addEventListener("dragover", dragOverHandler);
 	dropZone.addEventListener("drop", fileUploadHandler);
 
-	// Select file button listener
+	// Select file button
 	uploadButton.addEventListener("change", fileUploadHandler);
+
+	// Play
+	playButton.addEventListener("click", playPauseHandler);
+	// Stop
+	stopButton.addEventListener("click", stopHandler);
 })();
