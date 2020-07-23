@@ -1,7 +1,7 @@
 // App Globals
 let appData = {
 	// Audio Constants
-	ctx: new (window.AudioContext || window.webkitAudioContext),
+	ctx: new (window.AudioContext || window.webkitAudioContext)(),
 	init: () => {
 		appData.SR = appData.ctx.sampleRate;
 		// frame generator params (match momentaryLoudness: 400ms, 0.1s hopSize)
@@ -15,6 +15,7 @@ let appData = {
 	playbackState: "stopped",
 	playStartTime: null,
 	pausedTime: null,
+	loop: false,
 	cursorCanvas: null
 };
 appData.init();
@@ -24,16 +25,12 @@ let essentia;
 EssentiaModule().then((EssentiaWasmModule) => {
 	essentia = new Essentia(EssentiaWasmModule);
 	console.log(essentia.version);
-})
+});
 
 // UTILITY FUNCTIONS
 
 // Audio Processing
-function phaseCorr(frameLeft, frameRight) {
-	// convert to float32array
-	const L = essentia.vectorToArray(frameLeft);
-	const R = essentia.vectorToArray(frameRight);
-
+function phaseCorr(L, R) {
 	const n = L.length;
 	if (n == 0) return null;
 
@@ -57,21 +54,25 @@ function phaseCorr(frameLeft, frameRight) {
 
 }
 
-async function analyseAudio(f) {
-	let descriptors = new Object();
-
+async function getAudio(f) {
 	// Decode Audio File
 	const buffer = await f.arrayBuffer();
 	const decodedAudio = await appData.ctx.decodeAudioData(buffer);
 	appData.decodedAudio = decodedAudio;
 
+	return decodedAudio;
+}
+
+async function analyseAudio(decodedAudio) {
+	console.log("Analysis started");
+	let descriptors = {};
 	// Separate channels needed for phase correlation
 	const leftChannelArray = decodedAudio.getChannelData(0);
 	const rightChannelArray = decodedAudio.getChannelData(1);
 
 	// Sum into mono track:
 	let monoSumArray = leftChannelArray.map(function(sample, idx) {
-		return (sample + rightChannelArray[idx]) / 2
+		return (sample + rightChannelArray[idx]) / 2;
 	});
 	descriptors.mono = monoSumArray;
 
@@ -79,20 +80,24 @@ async function analyseAudio(f) {
 	const framesLeft = essentia.FrameGenerator(leftChannelArray, appData.frameSize, appData.hopSize);
 	const framesRight = essentia.FrameGenerator(rightChannelArray, appData.frameSize, appData.hopSize);
 	const framesMono = essentia.FrameGenerator(monoSumArray, appData.frameSize, appData.hopSize);
+	// convert frame type to float32array
+	let framesLeftArray = new Array(framesLeft.size());
+	let framesRightArray = new Array(framesRight.size());
+	for (let j=0; j<framesLeft.size(); j++) {
+		framesLeftArray[j] = essentia.vectorToArray(framesLeft.get(j));
+		framesRightArray[j] = essentia.vectorToArray(framesRight.get(j));
+	}
 
-	const monoRMS = [];
-	const phaseCorrelation = [];
+	let monoRMS = [];
+	let phaseCorrelation = [];
 	for (let i=0; i<framesLeft.size(); i++) {
-		const leftFrame = framesLeft.get(i);
-		const rightFrame = framesRight.get(i);
-		const monoFrame = framesMono.get(i);
 		// RMS:
 		monoRMS.push(
-			20 * Math.log10(Math.abs(essentia.RMS(monoFrame).rms)) // linear amp converted to dBFS
+			20 * Math.log10(Math.abs(essentia.RMS(framesMono.get(i)).rms)) // linear amp converted to dBFS
 		);
 		// Phase Correlation:
 		phaseCorrelation.push(
-			phaseCorr(leftFrame, rightFrame)
+			phaseCorr(framesLeftArray[i], framesRightArray[i])
 		);
 	}
 	descriptors.rms = Float32Array.from(monoRMS);
@@ -109,6 +114,7 @@ async function analyseAudio(f) {
 	descriptors.loudnessRange = loudnessEBU.loudnessRange;
 	
 	appData.descriptors = descriptors;
+	console.log("Analysis ended!");
 	return descriptors;
 }
 
@@ -121,9 +127,9 @@ function drawAudio(descriptors) {
 
 	// Instantiate FAV.js objects
 	const displayTop = new fav.Display("waveform", "wave", channelTop.clientWidth, channelTop.clientHeight);
-	const displayBottom = new fav.Display("loudness-data", "fill", channelBottom.clientWidth, channelBottom.clientHeight);
-	displayBottom.addLayer("fill");
-	displayBottom.addLayer("fill");
+	const displayBottom = new fav.Display("loudness-data", "line", channelBottom.clientWidth, channelBottom.clientHeight);
+	displayBottom.addLayer("line");
+	displayBottom.addLayer("line");
 
 	console.log(descriptors);
 	let wave = new fav.Signal(descriptors.mono, appData.SR);
@@ -138,13 +144,13 @@ function drawAudio(descriptors) {
 			rms.normalize().scale(65).offset(8).smooth(15)
 		]);
 
-	rms.normalize().smooth(20).draw(displayBottom[0],
+	rms.normalize().smooth(30).draw(displayBottom[0],
 		"rgba(149, 0, 255, 0.5)"
 		); // light purple
-	mLoudness.normalize().smooth(20).draw(displayBottom[1],
+	mLoudness.normalize().smooth(30).draw(displayBottom[1],
 		"rgba(255, 255, 255, 0.5)"
 		); // white
-	stLoudness.normalize().smooth(20).draw(displayBottom[2],
+	stLoudness.normalize().smooth(30).draw(displayBottom[2],
 		"rgba(31, 244, 255, 0.5)"
 		); // light blue
 	
@@ -158,12 +164,19 @@ function playSound() {
 	appData.bufferNode = appData.ctx.createBufferSource();
 	appData.bufferNode.buffer = appData.decodedAudio;
 	appData.bufferNode.connect(appData.ctx.destination);
+	appData.bufferNode.onended = function() {
+		const playButton = document.querySelector("#play-pause");
+		if (playButton.classList.contains("active-btn")) {
+			appData.playbackState = "stopped";
+			playButton.classList.remove("active-btn");
+		}
+	}
 
 	if (appData.pausedTime != null && appData.playbackState === "paused") {
-		appData.playStartTime = Date.now() - appData.pausedTime;
-		appData.bufferNode.start(0, appData.pausedTime / 1000);
+		appData.playStartTime = appData.ctx.currentTime - appData.pausedTime;
+		appData.bufferNode.start(0, appData.pausedTime);
 	} else {
-		appData.playStartTime = Date.now();
+		appData.playStartTime = appData.ctx.currentTime;
 		appData.bufferNode.start(0);
 	}
 	
@@ -173,7 +186,7 @@ function playSound() {
 function pauseSound() {
 	appData.bufferNode.stop(0);
 	appData.playbackState = "paused";
-	appData.pausedTime = Date.now() - appData.playStartTime;
+	appData.pausedTime = appData.ctx.currentTime - appData.playStartTime;
 }
 
 
@@ -186,12 +199,12 @@ function playPauseHandler(e) {
 
 	if (appData.playbackState === "stopped" || appData.playbackState === "paused") {
 		playSound();
-		e.target.classList.remove("stopped");
-		e.target.classList.add("playing");
+		e.target.classList.add("active-btn");
+		const stopBtn = document.querySelector("#stop");
+		stopBtn.classList.remove("active-btn");
 	} else if (appData.playbackState === "playing") {
 		pauseSound();
-		e.target.classList.remove("playing");
-		e.target.classList.add("stopped");
+		e.target.classList.remove("active-btn");
 	}
 	// switch css class for "playing"
 	
@@ -203,6 +216,22 @@ function stopHandler(e) {
 		appData.bufferNode.stop(0);
 		appData.pausedTime = null;
 		appData.playbackState = "stopped";
+
+		e.target.classList.add("active-btn");
+		const playBtn = document.querySelector("#play-pause");
+		playBtn.classList.remove("active-btn");
+	}
+}
+
+function loopBtnHandler(e) {
+	if (!appData.bufferNode.loop) {
+		e.target.textContent = "Loop ON";
+		e.target.classList.add("active-btn");
+		appData.bufferNode.loop = true;
+	} else {
+		e.target.textContent = "Loop OFF";
+		e.target.classList.remove("active-btn");
+		appData.bufferNode.loop = false;
 	}
 }
 
@@ -225,9 +254,12 @@ function fileUploadHandler(e) {
 			appData.uploadedFile = file;
 			// Audio Processing:
 			console.log(`Got file named ${file.name}`);
-			analyseAudio(file)
+			getAudio(file)
+			.then(analyseAudio)
 			.then(drawAudio)
-			.catch((e) => { console.log(`Error in handling promise: ${e}`) });
+			.catch((e) => { 
+				console.log(`Error in handling promise: ${e.stack}`); 
+			});
 
 		} else {
 			alert("We couldn't accept your file. Make sure you're uploading an audio file");
@@ -235,7 +267,7 @@ function fileUploadHandler(e) {
 	} else if (numFiles > 1) {
 		alert("Sorry, you can only upload 1 file at a time. Try again.");
 	} else {
-		alert("0 files were provided. Please upload a file.")
+		alert("0 files were provided. Please upload a file.");
 	}
 }
 
@@ -265,6 +297,7 @@ function mousemoveCanvasHandler(e) {
 	const uploadButton = document.querySelector("#upload");
 	const playButton = document.querySelector("#play-pause");
 	const stopButton = document.querySelector("#stop");
+	const loopButton = document.querySelector("#loop-toggle");
 
 	// SET LISTENERS
 	// Drag n drop
@@ -278,4 +311,6 @@ function mousemoveCanvasHandler(e) {
 	playButton.addEventListener("click", playPauseHandler);
 	// Stop
 	stopButton.addEventListener("click", stopHandler);
+	// Set loop
+	loopButton.addEventListener("click", loopBtnHandler);
 })();

@@ -382,7 +382,8 @@ module.exports = Signal;
 },{}],6:[function(require,module,exports){
 module.exports = {
       "mean": function(slice){
-        return slice.reduce((a,b) => a+b)/slice.length;
+        const sliceSum = slice.reduce((a,b) => a+b, 0);
+        return sliceSum/slice.length;
       },
       "median": function(slice){
         let sorted = slice.slice(0).sort((a,b) => a - b);

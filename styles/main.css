@@ -117,12 +117,12 @@ input[type="file"] {
 	display: none;
 }
 
-#play-pause.playing {
+button:active {
 	background-color: #f7d810;
 }
 
-#play-pause.stopped {
-	background-color: -internal-light-dark-color(rgb(239, 239, 239), rgb(74, 74, 74));
+.active-btn {
+	background-color: #f7d810;
 }
 
 /*|| Data Display */
